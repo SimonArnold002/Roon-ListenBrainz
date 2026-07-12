@@ -7,7 +7,6 @@ const el = (tag, props = {}, kids = []) => {
 };
 
 let state = { paired: false, zones: [], username: null, defaultZone: null };
-let currentPlaylist = null;
 
 async function api(path, opts) {
   const r = await fetch(path, opts);
@@ -78,7 +77,6 @@ async function loadPlaylists() {
 
 // --- tracks -----------------------------------------------------------------
 async function selectPlaylist(p, li) {
-  currentPlaylist = p.id;
   [...$("#playlistList").children].forEach(c => c.classList.remove("active"));
   li && li.classList.add("active");
   $("#tracksTitle").textContent = p.title;
@@ -96,7 +94,6 @@ async function selectPlaylist(p, li) {
 }
 
 async function selectFresh(li) {
-  currentPlaylist = "__fresh__";
   [...$("#playlistList").children].forEach(c => c.classList.remove("active"));
   li && li.classList.add("active");
   $("#tracksTitle").textContent = "Fresh Releases";
@@ -146,7 +143,8 @@ function trackRow(t, kind = "track") {
         body: JSON.stringify({ artist: t.artist, title: t.title, zone, action, kind }),
       });
       if (r.ok) { res.textContent = "✓ " + (r.matched || "playing"); res.className = "res ok"; }
-      else { res.textContent = "no match"; res.className = "res bad"; toast("No Roon match: " + t.artist + " – " + t.title); }
+      else if (r.reason === "no-match") { res.textContent = "no match"; res.className = "res bad"; toast("No Roon match: " + t.artist + " – " + t.title); }
+      else { res.textContent = "failed"; res.className = "res bad"; toast(r.message || 'Roon has no "' + action + '" action for this'); }
     } catch (e) { res.textContent = "error"; res.className = "res bad"; toast(e.message); }
     finally { play.disabled = queue.disabled = !state.paired; }
   };
@@ -157,13 +155,15 @@ function trackRow(t, kind = "track") {
 
 // --- events -----------------------------------------------------------------
 $("#saveUser").onclick = async () => {
-  await api("/api/config", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: $("#username").value.trim() }),
-  });
+  try {
+    await api("/api/config", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: $("#username").value.trim() }),
+    });
+    toast("Saved");
+  } catch (e) { toast(e.message); }
   await refreshState();
   await loadPlaylists();
-  toast("Saved");
 };
 
 function connectWS() {

@@ -2,8 +2,8 @@
 
 Companion **web UI** Roon extension that resolves ListenBrainz playlists /
 recommendations and plays them into a Roon zone via Roon's own browse-search.
-No MusicBrainz local endpoint — MBID→metadata goes through the LMS-community
-hosted API with a public-MB fallback.
+No MusicBrainz local endpoint — MBID→text goes to the public MusicBrainz API
+(throttled to ~1 req/s, cached; most tracks ship their text inline anyway).
 
 ## Status
 
@@ -20,7 +20,6 @@ Tested with a throwaway Node here (no Roon subscription on the build machine):
 - ✅ Dependencies install (Roon libs from GitHub), all modules boot, no throws
 - ✅ Web server serves the SPA + REST API; `/api/state`, static assets, guards
 - ✅ Live ListenBrainz fetch + JSPF parse (real `createdfor` playlists/tracks)
-- ✅ Matcher unit tests (accents, ligatures, feat./remaster, articles, rejects) 7/7
 - ✅ mDNS advertise + SOOD discovery start
 - ❔ **Pairing, browse-search, and actual playback** — need a real Roon Core +
   Tidal/Qobuz subscription. This is the part to smoke-test on the target box
@@ -35,7 +34,7 @@ against real search rows. Both are isolated in `match.js` / `roon-play.js`.
 | Concern        | Decision                                                     |
 |----------------|--------------------------------------------------------------|
 | UX surface     | Companion web UI (SPA + REST/WS), served LAN-wide            |
-| Metadata       | Eager — MBID→text for whole playlist on open (cached)       |
+| Metadata       | Eager — MBID→text for whole playlist on open (public MB, cached) |
 | Roon match     | Lazy — browse-search on play/queue click                    |
 | Core discovery | node-roon-api SOOD → **Enable** in Roon Settings → Extensions |
 | UI discovery   | mDNS `_http._tcp` (Bonjour), bind `0.0.0.0`                  |
@@ -107,9 +106,6 @@ buffer is in-memory only — a container restart clears it.
 - **ListenBrainz username** — set in the web UI, or in Roon → Settings →
   Extensions → this extension. Env override: `LB_USER`.
 - **`PORT`** — web UI port (default `9330`).
-- **`HOSTED_API_BASE`** — optional MBID→text resolver base (e.g.
-  `https://api.lms-community.org`). Unset → public MusicBrainz WS (rate-limited,
-  no mirror). Only fires for tracks whose JSPF lacks artist/title text.
 
 ## Files
 
@@ -121,7 +117,7 @@ buffer is in-memory only — a container restart clears it.
   `fresh_releases` (deduped by release group, newest first). Rows carry a
   Cover Art Archive thumbnail URL (`front-250`) that the browser loads
   directly — no server-side proxying or image libraries.
-- `src/resolve.js` — eager MBID→text (hosted API + public-MB fallback, cached).
+- `src/resolve.js` — eager MBID→text (public MB, throttled + cached).
 - `src/server.js` — Express REST + WebSocket + static SPA.
 - `src/mdns.js` — Bonjour `_http._tcp` advertising.
 - `src/index.js` — entry; wires it all + optional `RUN_DEMO=1`.

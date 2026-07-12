@@ -17,13 +17,11 @@ let core = null;
 let zones = [];
 const coreListeners = [];
 const zoneListeners = [];
-const settingsListeners = [];
 
 function fire(list, arg) { for (const fn of list) { try { fn(arg); } catch (e) { console.error(e); } } }
 
 function onCore(fn)     { coreListeners.push(fn); if (core) fn(core); }
 function onZones(fn)    { zoneListeners.push(fn); }
-function onSettings(fn) { settingsListeners.push(fn); }
 
 function getCore()  { return core; }
 function getZones() { return zones; }
@@ -31,7 +29,7 @@ function getZones() { return zones; }
 const roon = new RoonApi({
     extension_id:    "com.simon.listenbrainz",
     display_name:    "ListenBrainz for Roon",
-    display_version: "0.1.0",
+    display_version: "0.1.1",
     publisher:       "Simon Arnold",
     email:           "simon.arnold@unionvfx.com",
 
@@ -68,22 +66,30 @@ function upsertZone(z) {
 // Env vars win over the Roon-persisted values (handy for Docker).
 const ENV_MAP = { lb_username: "LB_USER" };
 
+// load_config re-reads + re-parses config.json synchronously on every call, and
+// /api/state hits getSetting several times per request — cache the parsed
+// settings and invalidate only where this process writes them.
+let settingsCache = null;
+function readSettings() {
+    if (!settingsCache) settingsCache = roon.load_config("settings") || {};
+    return settingsCache;
+}
+
+function envOverride(key) { return (ENV_MAP[key] && process.env[ENV_MAP[key]]) || null; }
+
 function getSetting(key) {
-    if (ENV_MAP[key] && process.env[ENV_MAP[key]]) return process.env[ENV_MAP[key]];
-    const s = roon.load_config("settings") || {};
-    return s[key];
+    return envOverride(key) ?? readSettings()[key];
 }
 
 function setSetting(key, value) {
-    const s = roon.load_config("settings") || {};
-    s[key] = value;
+    const s = { ...readSettings(), [key]: value };
     roon.save_config("settings", s);
+    settingsCache = s;
     svc_settings.update_settings(makeSettingsLayout(s));
-    fire(settingsListeners, s);
 }
 
 function makeSettingsLayout(values) {
-    values = values || roon.load_config("settings") || {};
+    values = values || readSettings();
     return {
         values,
         layout: [
@@ -102,7 +108,7 @@ const svc_settings = new RoonApiSettings(roon, {
         req.send_complete(l.has_error ? "NotValid" : "Success", { settings: l });
         if (!isdryrun && !l.has_error) {
             roon.save_config("settings", l.values);
-            fire(settingsListeners, l.values);
+            settingsCache = l.values;
         }
     },
 });
@@ -124,6 +130,6 @@ function setStatus(msg, isError = false) { svc_status.set_status(msg, isError); 
 
 module.exports = {
     roon, start, setStatus,
-    onCore, onZones, onSettings,
-    getCore, getZones, getSetting, setSetting,
+    onCore, onZones,
+    getCore, getZones, getSetting, setSetting, envOverride,
 };

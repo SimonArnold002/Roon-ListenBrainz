@@ -9,7 +9,7 @@ const http = require("http");
 const express = require("express");
 const { WebSocketServer } = require("ws");
 
-const { getCore, getZones, getSetting, setSetting } = require("./roon");
+const { getCore, getZones, getSetting, setSetting, envOverride } = require("./roon");
 const { searchAndPlay } = require("./roon-play");
 const lb = require("./listenbrainz");
 const resolve = require("./resolve");
@@ -22,12 +22,19 @@ function createServer() {
 
     app.get("/api/state", (req, res) => {
         const core = getCore();
+        const zones = getZones();
+        // Roon's zone-type setting stores an OUTPUT object; the dropdown is
+        // keyed by zone_id, so map the output_id to its owning zone.
+        const dz = getSetting("default_zone");
+        const dzId = dz?.output_id || (typeof dz === "string" ? dz : null);
+        const dzZone = dzId && zones.find(z =>
+            z.zone_id === dzId || (z.outputs || []).some(o => o.output_id === dzId));
         res.json({
             paired:      !!core,
             core:        core ? core.display_name : null,
             username:    getSetting("lb_username") || null,
-            defaultZone: getSetting("default_zone")?.output_id || getSetting("default_zone") || null,
-            zones:       getZones().map(z => ({ id: z.zone_id, name: z.display_name })),
+            defaultZone: dzZone ? dzZone.zone_id : null,
+            zones:       zones.map(z => ({ id: z.zone_id, name: z.display_name })),
             debug:       logger.isDebug(),
         });
     });
@@ -45,7 +52,15 @@ function createServer() {
 
     app.post("/api/config", (req, res) => {
         const { username } = req.body || {};
-        if (typeof username === "string") setSetting("lb_username", username.trim());
+        if (typeof username === "string") {
+            // An env override would silently win over the saved value — say so
+            // instead of letting the UI report a save that has no effect.
+            const env = envOverride("lb_username");
+            if (env && env !== username.trim()) {
+                return res.status(409).json({ error: `username is fixed by the LB_USER env var ("${env}")`, username: env });
+            }
+            setSetting("lb_username", username.trim());
+        }
         res.json({ ok: true, username: getSetting("lb_username") || null });
     });
 

@@ -2,36 +2,24 @@
 // renders. ListenBrainz JSPF usually supplies both inline, so this is cheap —
 // the MBID→text lookup only fires for tracks missing text.
 //
-// No MusicBrainz local endpoint (by design). Resolution order:
-//   1. hosted API (LMS-community), if HOSTED_API_BASE is configured
-//   2. public MusicBrainz WS/2 (rate-limited to ~1 req/s, no mirror needed)
-// Results are cached in-memory for the process lifetime.
+// Lookups go to public MusicBrainz WS/2 (no local mirror by design), with
+// request starts spaced ~1.1s apart so we never trip its rate limit.
+// Successes are cached for the process lifetime; failures only briefly — a
+// transient network blip must not pin a track as unresolved until restart.
 
-const UA = "roon-listenbrainz/0.1.0 ( simon.arnold@unionvfx.com )";
-const HOSTED_API_BASE = process.env.HOSTED_API_BASE || null; // e.g. https://api.lms-community.org
+const UA = "roon-listenbrainz/0.1.1 ( simon.arnold@unionvfx.com )";
 
-const cache = new Map();      // mbid -> {artist,title} | null
+const FAIL_TTL_MS = 5 * 60 * 1000;
+const cache = new Map();      // mbid -> { meta } (success) | { failedUntil } (failure)
+const inflight = new Map();   // mbid -> Promise — dedupes concurrent lookups of one mbid
 
-// crude 1.1s throttle so we never trip public MB's rate limit
+// crude throttle: each MB request starts >=1.1s after the previous one STARTED;
+// the first goes immediately.
 let mbChain = Promise.resolve();
 function mbThrottle() {
-    const wait = mbChain.then(() => new Promise(r => setTimeout(r, 1100)));
-    mbChain = wait;
-    return wait;
-}
-
-async function hostedLookup(mbid) {
-    if (!HOSTED_API_BASE) return null;
-    try {
-        const r = await fetch(`${HOSTED_API_BASE.replace(/\/$/, "")}/recording/${mbid}`, {
-            headers: { Accept: "application/json", "User-Agent": UA },
-        });
-        if (!r.ok) return null;
-        const j = await r.json();
-        const artist = j.artist || j["artist-credit-phrase"] || (j["artist-credit"] || []).map(a => a.name).join(", ");
-        const title = j.title || j.name;
-        return artist && title ? { artist, title } : null;
-    } catch { return null; }
+    const gate = mbChain;
+    mbChain = mbChain.then(() => new Promise(r => setTimeout(r, 1100)));
+    return gate;
 }
 
 async function mbLookup(mbid) {
@@ -48,12 +36,23 @@ async function mbLookup(mbid) {
     } catch { return null; }
 }
 
-async function lookupRecording(mbid) {
-    if (cache.has(mbid)) return cache.get(mbid);
-    let meta = await hostedLookup(mbid);
-    if (!meta) meta = await mbLookup(mbid);
-    cache.set(mbid, meta);
-    return meta;
+function lookupRecording(mbid) {
+    const c = cache.get(mbid);
+    if (c) {
+        if (c.meta) return Promise.resolve(c.meta);
+        if (Date.now() < c.failedUntil) return Promise.resolve(null);
+        cache.delete(mbid);   // failure TTL expired — retry
+    }
+    let p = inflight.get(mbid);
+    if (!p) {
+        p = mbLookup(mbid).then(meta => {
+            cache.set(mbid, meta ? { meta } : { failedUntil: Date.now() + FAIL_TTL_MS });
+            inflight.delete(mbid);
+            return meta;
+        });
+        inflight.set(mbid, p);
+    }
+    return p;
 }
 
 async function enrich(track) {
@@ -68,11 +67,12 @@ async function enrich(track) {
     return track;
 }
 
-// Eager: resolve the whole playlist up front. Tracks that already have text
-// resolve instantly; only the gaps hit the network (serialised by the throttle).
+// Eager: resolve the whole playlist up front, in parallel. Tracks with inline
+// text or cached lookups resolve instantly; only real MB lookups queue behind
+// the shared throttle.
 async function enrichAll(tracks) {
-    for (const t of tracks) await enrich(t);
+    await Promise.all(tracks.map(t => enrich(t)));
     return tracks;
 }
 
-module.exports = { enrich, enrichAll, lookupRecording };
+module.exports = { enrich, enrichAll };

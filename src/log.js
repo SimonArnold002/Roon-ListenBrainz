@@ -5,6 +5,8 @@
 // Levels: normal lines always logged; debug() lines only when debug mode is on
 // (env LBR_DEBUG=1, or toggled at runtime via POST /api/debug).
 
+const util = require("util");
+
 const MAX_LINES = 2000;
 const buffer = [];
 
@@ -12,10 +14,16 @@ let debugOn = process.env.LBR_DEBUG === "1";
 
 function ts() { return new Date().toISOString(); }
 
+function fmt(a) {
+    if (typeof a === "string") return a;
+    if (a instanceof Error) return a.stack || a.message;
+    // JSON.stringify throws on circular structures / BigInt — and we're inside
+    // the patched console, so a throw here escapes from the caller's log line.
+    try { return JSON.stringify(a); } catch { return util.inspect(a, { depth: 4 }); }
+}
+
 function push(level, args) {
-    const line = `${ts()} [${level}] ` + args.map(a =>
-        typeof a === "string" ? a : (a instanceof Error ? (a.stack || a.message) : JSON.stringify(a))
-    ).join(" ");
+    const line = `${ts()} [${level}] ` + args.map(fmt).join(" ");
     buffer.push(line);
     if (buffer.length > MAX_LINES) buffer.splice(0, buffer.length - MAX_LINES);
     return line;

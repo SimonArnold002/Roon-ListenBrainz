@@ -22,8 +22,6 @@ function fold(s) {
         .trim();
 }
 
-function tokens(s) { return fold(s).split(" ").filter(Boolean); }
-
 // Fraction of the wanted tokens present in the candidate (containment, not order).
 function containment(candTokens, wantTokens) {
     if (!wantTokens.length) return 0;
@@ -38,7 +36,7 @@ function fieldScore(cand, want) {
     const c = fold(cand), w = fold(want);
     if (!w) return 0;
     if (c === w) return 1;
-    const ct = tokens(cand), wt = tokens(want);
+    const ct = c.split(" ").filter(Boolean), wt = w.split(" ").filter(Boolean);
     const fwd = containment(ct, wt);          // all of what we want is present
     const rev = containment(wt, ct);          // candidate isn't wildly longer
     return Math.min(fwd, 0.5 + rev / 2) * fwd; // reward complete + tight matches
@@ -51,14 +49,4 @@ function scoreRow(row, target) {
     return { score: t * 0.6 + a * 0.4, t, a };
 }
 
-// Pick the best row at or above threshold. Returns { row, score } or null.
-function pickBest(rows, target, threshold = 0.62) {
-    let best = null, bestScore = -1;
-    for (const row of rows) {
-        const { score } = scoreRow(row, target);
-        if (score > bestScore) { bestScore = score; best = row; }
-    }
-    return best && bestScore >= threshold ? { row: best, score: bestScore } : null;
-}
-
-module.exports = { fold, tokens, scoreRow, pickBest };
+module.exports = { fold, scoreRow };
