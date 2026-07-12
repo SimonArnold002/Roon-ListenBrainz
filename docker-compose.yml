@@ -1,0 +1,34 @@
+services:
+  roon-listenbrainz:
+    build: .
+    image: roon-listenbrainz:0.1.0
+    container_name: roon-listenbrainz
+
+    # REQUIRED. Roon's SOOD discovery and mDNS advertising rely on LAN
+    # broadcast/multicast, which bridged Docker networking blocks. Without host
+    # networking the extension never finds the Core and never appears under
+    # Roon -> Settings -> Extensions. (Host networking works on Linux hosts;
+    # on Docker Desktop for Mac/Windows it is limited — run this on the Linux
+    # box / NAS near the Core.)
+    network_mode: host
+
+    volumes:
+      # Persist the Roon pairing token (config.json) across restarts.
+      - roon-data:/data
+
+    environment:
+      - NODE_ENV=production
+      - PORT=9330
+      # Verbose logging from startup (candidate scores etc.). Also togglable at
+      # runtime without a restart: POST /api/debug {"on":true}. Read the log
+      # remotely at http://<host>:9330/log.txt
+      - LBR_DEBUG=1
+      # Uncomment to fire a one-shot demo play after pairing:
+      # - RUN_DEMO=1
+      # - DEMO_ARTIST=Bonobo
+      # - DEMO_TITLE=Kerala
+
+    restart: unless-stopped
+
+volumes:
+  roon-data:

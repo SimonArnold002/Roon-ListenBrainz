@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ListenBrainz for Roon</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>ListenBrainz <span>for Roon</span></h1>
+    <div id="status" class="status">connecting…</div>
+  </header>
+
+  <section class="bar">
+    <label>ListenBrainz user
+      <input id="username" type="text" placeholder="username" autocomplete="off" />
+    </label>
+    <button id="saveUser">Save</button>
+
+    <label class="grow">Zone
+      <select id="zone"></select>
+    </label>
+  </section>
+
+  <main>
+    <aside id="playlists">
+      <h2>Playlists</h2>
+      <ul id="playlistList"><li class="muted">…</li></ul>
+    </aside>
+
+    <div id="tracks">
+      <h2 id="tracksTitle">Pick a playlist</h2>
+      <ol id="trackList"></ol>
+    </div>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
