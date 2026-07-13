@@ -1,7 +1,7 @@
 services:
   roon-listenbrainz:
     build: .
-    image: roon-listenbrainz:0.1.1
+    image: roon-listenbrainz:0.1.2
     container_name: roon-listenbrainz
 
     # REQUIRED. Roon's SOOD discovery and mDNS advertising rely on LAN

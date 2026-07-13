@@ -15,11 +15,29 @@
 // MBIDs here, so the text matcher in scoreRows() is the ONLY gate. That is the
 // part most likely to need tuning.
 
-const { scoreRow } = require("./match");
+const { scoreRow, fold } = require("./match");
 const logger = require("./log");
 
 const HIER = "search";
 const THRESHOLD = 0.62;
+const MAX_DEPTH = 6;
+
+// Roon's transport verbs. Rows carry hint "action", but a row titled with one of
+// these is an action whatever the hint says — never descend into it looking for
+// a way down, or asking to Queue could execute Play Now instead.
+const ACTION_TITLES = new Set(["play now", "add next", "queue", "start radio", "shuffle"]);
+
+// Roon renders linked artists as "[[328570|The Rolling Stones]]" (album rows do;
+// track rows send plain text). The matcher strips bracketed text — that's how it
+// drops "[remaster]" — so leaving the markup in wipes the whole artist field and
+// costs 0.4 of the score. Unwrap to the bare name before anything reads the row.
+function unlink(s) {
+    return (s || "").replace(/\[\[\d+\|([^\]|]+)\]\]/g, "$1");
+}
+
+function cleanRow(row) {
+    return { ...row, title: unlink(row.title), subtitle: unlink(row.subtitle) };
+}
 
 function browse(core, opts) {
     return new Promise((resolve, reject) => {
@@ -73,7 +91,7 @@ async function doSearchAndPlay(core, { artist, title }, zoneOrOutputId, action =
 
     // 4. score every row ONCE — the debug log lines and the pick share the pass.
     // The grep-able candidates line (same habit as the LMS plugins' debug logs).
-    const scored = rows.map(row => ({ row, ...scoreRow(row, { artist, title }) }));
+    const scored = rows.map(cleanRow).map(row => ({ row, ...scoreRow(row, { artist, title }) }));
     if (logger.isDebug()) {
         for (const s of scored)
             logger.debug(`candidates Roon: ${s.score.toFixed(2)} (t=${s.t.toFixed(2)} a=${s.a.toFixed(2)}) "${s.row.title}" — "${s.row.subtitle}"`);
@@ -86,12 +104,14 @@ async function doSearchAndPlay(core, { artist, title }, zoneOrOutputId, action =
     }
     console.log(`[play] matched: "${hit.row.title}" — ${hit.row.subtitle} (score ${hit.score.toFixed(2)})`);
 
-    // 5-6. open the winner WITH the zone and walk down to the requested action.
-    // A track usually opens straight onto an action list (Play Now / Queue…).
-    // An album opens its album PAGE first — whose "Play Album" row then opens
-    // the action list — so allow a couple of descents before giving up.
+    // 5-6. Open the winner WITH the zone and walk down until Roon offers the
+    // action rows. The depth varies by kind: a track goes row -> (version) ->
+    // action list, while an album goes row -> version -> album page -> action
+    // list, and the intermediate rows are hinted "list", not "action_list". So
+    // don't hard-code a shape: descend until items carrying hint "action"
+    // appear, and pick the requested one from those.
     let key = hit.row.item_key;
-    for (let depth = 0; depth < 3; depth++) {
+    for (let depth = 0; depth < MAX_DEPTH; depth++) {
         const r = await browse(core, { item_key: key, zone_or_output_id: zoneOrOutputId });
         if (r.action === "message") {
             // Roon replied with a user-facing message — is_error says whether
@@ -106,29 +126,39 @@ async function doSearchAndPlay(core, { artist, title }, zoneOrOutputId, action =
             // Roon acted immediately (none) — treat as executed.
             return { ok: true, matched: hit.row.title };
         }
-        const items = (await load(core)).items;
-        logger.debug(`action level ${depth}:`, items.map(i => i.title).slice(0, 8).join(" | "));
+        const items = ((await load(core)).items || []).map(cleanRow);
+        logger.debug(`level ${depth}:`, items.map(i => `${i.title}[${i.hint || "-"}]`).slice(0, 10).join(" | "));
 
-        // ONLY the exact requested action — silently downgrading "Queue" to
-        // "Play Now" would interrupt what the user is listening to.
-        const chosen = findCategory(items, action);
-        if (chosen) {
-            await browse(core, { item_key: chosen.item_key, zone_or_output_id: zoneOrOutputId });
-            console.log(`[play] executed "${chosen.title}"`);
-            return { ok: true, matched: hit.row.title, action: chosen.title };
+        // Are we at the action list? Then take ONLY the exact action asked for —
+        // silently downgrading "Queue" to "Play Now" would interrupt playback.
+        const actions = items.filter(i => (i.hint || "") === "action");
+        const exact = items.find(i => (i.title || "").toLowerCase() === action.toLowerCase());
+        if (exact) {
+            await browse(core, { item_key: exact.item_key, zone_or_output_id: zoneOrOutputId });
+            console.log(`[play] executed "${exact.title}"`);
+            return { ok: true, matched: hit.row.title, action: exact.title };
         }
-        // …otherwise descend through the album page's play entry. Only rows
-        // hinted action_list (they OPEN an action list) qualify — a bare title
-        // match like /^play/ would swallow the "Play Now" ACTION and execute
-        // it, silently downgrading the requested action after all.
-        const lists = items.filter(i => (i.hint || "") === "action_list");
-        const descend = lists.find(i => /^play\b/i.test(i.title || "")) || lists[0];
-        if (!descend) {
+        if (actions.length) {
             console.warn(`[play] action "${action}" not offered for "${query}"`);
+            return { ok: false, reason: "no-action", candidates: actions.map(i => i.title) };
+        }
+
+        // Not there yet — step toward it: an explicit play entry, else the row
+        // that still names what we matched (the version/album page), else the
+        // only way forward. Never step into another transport verb: on a Core
+        // that omits the "action" hint that would execute Play Now when the
+        // user asked to Queue.
+        const openable = items.filter(i => !ACTION_TITLES.has((i.title || "").toLowerCase()));
+        const next = openable.find(i => /^play\b/i.test(i.title || "")) ||
+                     openable.find(i => fold(i.title) === fold(hit.row.title)) ||
+                     (openable.length === 1 ? openable[0] : null);
+        if (!next) {
+            console.warn(`[play] no way down to an action list for "${query}"`);
             return { ok: false, reason: "no-action", candidates: items.map(i => i.title).slice(0, 8) };
         }
-        key = descend.item_key;
+        key = next.item_key;
     }
+    console.warn(`[play] gave up descending for "${query}"`);
     return { ok: false, reason: "no-action", candidates: [] };
 }
 

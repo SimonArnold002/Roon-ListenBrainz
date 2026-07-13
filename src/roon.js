@@ -29,7 +29,7 @@ function getZones() { return zones; }
 const roon = new RoonApi({
     extension_id:    "com.simon.listenbrainz",
     display_name:    "ListenBrainz for Roon",
-    display_version: "0.1.1",
+    display_version: "0.1.2",
     publisher:       "Simon Arnold",
     email:           "simon.arnold@unionvfx.com",
 

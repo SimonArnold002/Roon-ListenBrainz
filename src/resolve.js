@@ -7,7 +7,7 @@
 // Successes are cached for the process lifetime; failures only briefly — a
 // transient network blip must not pin a track as unresolved until restart.
 
-const UA = "roon-listenbrainz/0.1.1 ( simon.arnold@unionvfx.com )";
+const UA = "roon-listenbrainz/0.1.2 ( simon.arnold@unionvfx.com )";
 
 const FAIL_TTL_MS = 5 * 60 * 1000;
 const cache = new Map();      // mbid -> { meta } (success) | { failedUntil } (failure)

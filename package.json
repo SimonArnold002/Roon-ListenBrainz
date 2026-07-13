@@ -1,6 +1,6 @@
 {
   "name": "roon-listenbrainz",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Companion web UI that resolves ListenBrainz playlists/recommendations and plays them into a Roon zone via browse-search.",
   "type": "commonjs",
   "main": "src/index.js",
