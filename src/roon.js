@@ -31,7 +31,8 @@ const roon = new RoonApi({
     display_name:    "ListenBrainz for Roon",
     display_version: "0.1.2",
     publisher:       "Simon Arnold",
-    email:           "simon.arnold@unionvfx.com",
+    email:           "82664521+SimonArnold002@users.noreply.github.com",
+    website:         "https://github.com/SimonArnold002/Roon-ListenBrainz",
 
     core_paired: function (core_) {
         core = core_;
